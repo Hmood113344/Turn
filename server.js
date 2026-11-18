@@ -41,6 +41,7 @@ const BotJob = mongoose.model("BotJob", new mongoose.Schema({
     fields: [{ name: String, value: String }], claimed: { type: Boolean, default: false }, done: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
 }), "botjobs");
+const LoginToken = mongoose.model("LoginToken", new mongoose.Schema({ token: { type: String, unique: true }, uid: String, expiresAt: Date, used: { type: Boolean, default: false } }), "logintokens");
 const Reg = mongoose.model("Reg", new mongoose.Schema({
     uid: { type: String, unique: true }, answers: [String], status: { type: String, default: "pending" }, createdAt: { type: Date, default: Date.now },
 }), "regs");
@@ -65,7 +66,19 @@ app.use(session({
 }));
 const deny = (res, msg) => res.status(403).send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0a1628;color:#e2e8f0;font-family:Tahoma,sans-serif;text-align:center"><div style="padding:30px"><div style="font-size:60px">🚫</div><h2>${msg}</h2></div>`);
 
-// ---------- الدخول بديسكورد ----------
+// ---------- الدخول المباشر برابط البوت (من غير ما يسجل دخول) ----------
+app.get("/enter/:token", async (req, res) => {
+    try {
+        const t = await LoginToken.findOneAndUpdate({ token: String(req.params.token), used: false, expiresAt: { $gt: new Date() } }, { $set: { used: true } });
+        if (!t) return deny(res, "الرابط منتهي أو مستخدم. اكتب /دخول-الموقع بالديسكورد وخذ رابط جديد");
+        const acc = await Account.findOne({ uid: t.uid });
+        if (!acc) return deny(res, "ما قدّمت عن طريق البوت، الدخول ممنوع");
+        if (acc.shown) return deny(res, "تم إغلاق الموقع على حسابك");
+        req.session.uid = acc.uid; // ينحفظ دخوله 90 يوم
+        req.session.save(() => res.redirect("/"));
+    } catch (e) { console.error(e); deny(res, "صار خطأ"); }
+});
+// ---------- الدخول بديسكورد (احتياطي) ----------
 app.get("/auth/discord", (req, res) => {
     req.session.st = crypto.randomBytes(12).toString("hex");
     res.redirect("https://discord.com/oauth2/authorize?" + new URLSearchParams({ client_id: CFG.CLIENT_ID, redirect_uri: CFG.SITE_URL + "/auth/discord/callback", response_type: "code", scope: "identify", state: req.session.st }));
@@ -258,7 +271,7 @@ const h=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;","
 const api=async(p,b)=>{const r=await fetch(p,b?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)}:{});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"خطأ");return j};
 const act=async(p,b)=>{try{await api(p,b);await load(true)}catch(e){alert(e.message)}};
 async function load(keep){try{S=await api("/api/me")}catch(e){return login()}if(!keep)tab=null;render()}
-function login(){app.innerHTML='<div class="center"><h1>🎓 الكلية</h1><p class="muted">سجّل دخولك بحساب ديسكورد (لازم تكون مقدّم عن طريق البوت)</p><a class="btn" href="/auth/discord">تسجيل الدخول بديسكورد</a></div>'}
+function login(){app.innerHTML='<div class="center"><h1>🎓 الكلية</h1><p class="muted">ادخل من زر "دخول الموقع" اللي وصلك خاص من البوت، أو اكتب /دخول-الموقع بالديسكورد.</p><a class="btn gray" href="/auth/discord">أو سجّل بحساب ديسكورد</a></div>'}
 function head(){const m=S.me;return '<div class="panel top"><img src="'+h(m.avatar)+'"><div><b>'+h(m.name||m.username)+'</b><div class="muted">'+({senior:"كبار المسؤولين",trainer:"مدرب",trainee:"متدرب"}[m.role])+(m.sector?" — "+h(m.sector):"")+'</div></div><div class="sp"></div><a class="btn gray" href="/auth/logout">خروج</a></div>'}
 function render(){const m=S.me;let x=head();
  if(m.role==="senior")x+=seniorView();else if(m.role==="trainer")x+=trainerView();else x+=traineeView();
